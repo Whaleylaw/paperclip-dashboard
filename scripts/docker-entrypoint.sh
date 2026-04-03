@@ -26,4 +26,10 @@ if [ "$changed" = "1" ]; then
     chown -R node:node /paperclip
 fi
 
+# Run bootstrap invite script if no admin exists yet
+if [ -f /app/scripts/bootstrap-invite.mjs ]; then
+    echo "Running bootstrap invite check..."
+    gosu node node /app/scripts/bootstrap-invite.mjs || true
+fi
+
 exec gosu node "$@"
