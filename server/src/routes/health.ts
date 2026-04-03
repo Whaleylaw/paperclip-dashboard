@@ -1,3 +1,4 @@
+import { createHash, randomBytes } from "node:crypto";
 import { Router } from "express";
 import type { Db } from "@paperclipai/db";
 import { and, count, eq, gt, inArray, isNull, sql } from "drizzle-orm";
@@ -98,6 +99,62 @@ export function healthRoutes(
       },
       ...(devServer ? { devServer } : {}),
     });
+  });
+
+  // TEMPORARY: One-time bootstrap invite creation endpoint
+  // Remove after first admin is created
+  router.post("/bootstrap-invite", async (_req, res) => {
+    if (!db) {
+      res.status(500).json({ error: "no database" });
+      return;
+    }
+    try {
+      // Check if admin already exists
+      const roleCount = await db
+        .select({ count: count() })
+        .from(instanceUserRoles)
+        .where(sql`${instanceUserRoles.role} = 'instance_admin'`)
+        .then((rows) => Number(rows[0]?.count ?? 0));
+      if (roleCount > 0) {
+        res.status(400).json({ error: "admin_already_exists" });
+        return;
+      }
+
+      // Revoke existing bootstrap invites
+      const now = new Date();
+      await db
+        .update(invites)
+        .set({ revokedAt: now, updatedAt: now })
+        .where(
+          and(
+            eq(invites.inviteType, "bootstrap_ceo"),
+            isNull(invites.revokedAt),
+            isNull(invites.acceptedAt),
+            gt(invites.expiresAt, now),
+          ),
+        );
+
+      // Create new invite
+      const token = `pcp_bootstrap_${randomBytes(24).toString("hex")}`;
+      const tokenHash = createHash("sha256").update(token).digest("hex");
+      const expiresAt = new Date(Date.now() + 72 * 60 * 60 * 1000);
+
+      await db.insert(invites).values({
+        inviteType: "bootstrap_ceo",
+        tokenHash,
+        allowedJoinTypes: "human",
+        expiresAt,
+        invitedByUserId: "system",
+      });
+
+      const baseUrl = process.env.PAPERCLIP_PUBLIC_URL || `http://localhost:${process.env.PORT || 3100}`;
+      res.json({
+        inviteUrl: `${baseUrl}/invite/${token}`,
+        expiresAt: expiresAt.toISOString(),
+      });
+    } catch (err) {
+      res.status(500).json({ error: String(err) });
+    }
   });
 
   return router;
