@@ -55,7 +55,7 @@ ARG USER_UID=1000
 ARG USER_GID=1000
 WORKDIR /app
 COPY --chown=node:node --from=build /app /app
-RUN pip3 install --break-system-packages hermes-agent \
+RUN pip3 install --break-system-packages "hermes-agent @ git+https://github.com/NousResearch/hermes-agent.git" \
   && npm install --global --omit=dev @anthropic-ai/claude-code@latest @openai/codex@latest opencode-ai \
   && mkdir -p /paperclip \
   && chown node:node /paperclip
