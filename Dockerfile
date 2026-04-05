@@ -56,12 +56,9 @@ ARG USER_GID=1000
 WORKDIR /app
 COPY --chown=node:node --from=build /app /app
 
-# Hotfix: hermes-paperclip-adapter reads ctx.agent.adapterConfig (unresolved env bindings)
-# instead of ctx.config (resolved flat strings), causing API keys to be passed as [object Object].
-# This patches line 247 of execute.js to use ctx.config like every other adapter does.
-# Remove this once hermes-paperclip-adapter >= 0.4.0 fixes the bug upstream.
-RUN find /app -path '*/hermes-paperclip-adapter/dist/server/execute.js' -exec \
-  sed -i 's/const config = (ctx\.agent?\.adapterConfig ?? {});/const config = (ctx.config ?? {});/' {} +
+# NOTE: The hermes-paperclip-adapter env var resolution bug is fixed via pnpm patch
+# (see patches/hermes-paperclip-adapter.patch), which is applied during 'pnpm install'
+# in the deps stage above. No runtime sed patching needed.
 
 RUN pip3 install --break-system-packages "hermes-agent @ git+https://github.com/NousResearch/hermes-agent.git" \
   && npm install --global --omit=dev @anthropic-ai/claude-code@latest @openai/codex@latest opencode-ai \
