@@ -1,0 +1,19 @@
+diff --git a/dist/server/execute.js b/dist/server/execute.js
+index 93cddf8243271f5fb3ab101617f9114257e41328..ed543931982df32cdb7413747f17e76aaf236661 100644
+--- a/dist/server/execute.js
++++ b/dist/server/execute.js
+@@ -298,9 +298,12 @@ export async function execute(ctx) {
+     const taskId = cfgString(ctx.config?.taskId);
+     if (taskId)
+         env.PAPERCLIP_TASK_ID = taskId;
+-    const userEnv = config.env;
++    const userEnv = ctx.config?.env || config.env;
+     if (userEnv && typeof userEnv === "object") {
+-        Object.assign(env, userEnv);
++        for (const [k, v] of Object.entries(userEnv)) {
++            if (typeof v === "string") env[k] = v;
++            else if (v && typeof v === "object" && typeof v.value === "string") env[k] = v.value;
++        }
+     }
+     // ── Resolve working directory ──────────────────────────────────────────
+     const cwd = cfgString(config.cwd) || cfgString(ctx.config?.workspaceDir) || ".";
