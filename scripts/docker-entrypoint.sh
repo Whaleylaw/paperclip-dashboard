@@ -26,4 +26,22 @@ if [ "$changed" = "1" ]; then
     chown -R node:node /paperclip
 fi
 
+# Ensure the instance config directory exists on the persistent volume
+INSTANCE_DIR="/paperclip/instances/default"
+ENV_FILE="$INSTANCE_DIR/.env"
+mkdir -p "$INSTANCE_DIR"
+
+# Generate BETTER_AUTH_SECRET if not provided and not already persisted
+if [ -z "$BETTER_AUTH_SECRET" ] && [ -z "$PAPERCLIP_AGENT_JWT_SECRET" ]; then
+    if [ -f "$ENV_FILE" ] && grep -q '^BETTER_AUTH_SECRET=' "$ENV_FILE"; then
+        echo "Loading persisted BETTER_AUTH_SECRET from $ENV_FILE"
+    else
+        echo "Generating BETTER_AUTH_SECRET and persisting to $ENV_FILE"
+        SECRET=$(node -e "console.log(require('crypto').randomBytes(32).toString('hex'))")
+        echo "BETTER_AUTH_SECRET=$SECRET" >> "$ENV_FILE"
+    fi
+fi
+
+chown -R node:node "$INSTANCE_DIR"
+
 exec gosu node "$@"
