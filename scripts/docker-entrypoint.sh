@@ -44,4 +44,29 @@ fi
 
 chown -R node:node "$INSTANCE_DIR"
 
+# Auto-bootstrap: if there's a user but no instance_admin, promote the first user
+# This runs BEFORE the server starts, using the server's own DB connection
+if [ -n "$DATABASE_URL" ]; then
+    pip3 install --quiet --break-system-packages psycopg2-binary 2>/dev/null || true
+    python3 -c "
+import os, sys
+try:
+    import psycopg2
+except ImportError:
+    sys.exit(0)
+conn = psycopg2.connect(os.environ['DATABASE_URL'])
+cur = conn.cursor()
+cur.execute('SELECT count(*) FROM instance_user_roles WHERE role = %s', ('instance_admin',))
+admin_count = cur.fetchone()[0]
+if admin_count == 0:
+    cur.execute('SELECT id, email FROM \"user\" LIMIT 1')
+    row = cur.fetchone()
+    if row:
+        cur.execute('INSERT INTO instance_user_roles (id, user_id, role, created_at, updated_at) VALUES (gen_random_uuid(), %s, %s, NOW(), NOW()) ON CONFLICT DO NOTHING', (row[0], 'instance_admin'))
+        conn.commit()
+        print(f'Auto-bootstrapped {row[1]} as instance_admin')
+conn.close()
+" 2>/dev/null || true
+fi
+
 exec gosu node "$@"
