@@ -46,23 +46,24 @@ chown -R node:node "$INSTANCE_DIR"
 
 # Auto-bootstrap: if there's a user but no instance_admin, promote the first user
 if [ -n "$DATABASE_URL" ]; then
-    gosu node node -e "
-const p=require('postgres');
-const sql=p(process.env.DATABASE_URL,{ssl:'prefer',max:1});
-(async()=>{
-  try{
-    const admins=await sql\`SELECT count(*)::int AS c FROM instance_user_roles WHERE role='instance_admin'\`;
-    if(admins[0].c===0){
-      const users=await sql\`SELECT id,email FROM \"user\" LIMIT 1\`;
-      if(users.length>0){
-        await sql\`INSERT INTO instance_user_roles(id,user_id,role,created_at,updated_at)VALUES(gen_random_uuid(),\${users[0].id},'instance_admin',NOW(),NOW())ON CONFLICT DO NOTHING\`;
-        console.log('Auto-bootstrapped',users[0].email,'as instance_admin');
-      }
+    cat > /tmp/_bootstrap.mjs << 'BEOF'
+import postgres from "postgres";
+const sql = postgres(process.env.DATABASE_URL, { ssl: "prefer", max: 1 });
+try {
+  const admins = await sql`SELECT count(*)::int AS c FROM instance_user_roles WHERE role = 'instance_admin'`;
+  if (admins[0].c === 0) {
+    const users = await sql`SELECT id, email FROM "user" LIMIT 1`;
+    if (users.length > 0) {
+      await sql`INSERT INTO instance_user_roles (id, user_id, role, created_at, updated_at) VALUES (gen_random_uuid(), ${users[0].id}, 'instance_admin', NOW(), NOW()) ON CONFLICT DO NOTHING`;
+      console.log("Auto-bootstrapped", users[0].email, "as instance_admin");
     }
-  }catch(e){console.log('Bootstrap skip:',e.message)}
-  await sql.end();
-})();
-" 2>/dev/null || true
+  } else {
+    console.log("Admin already exists, skipping bootstrap");
+  }
+} catch (e) { console.log("Bootstrap skip:", e.message); }
+await sql.end();
+BEOF
+    cd /app && gosu node node /tmp/_bootstrap.mjs 2>&1 || true
 fi
 
 exec gosu node "$@"
