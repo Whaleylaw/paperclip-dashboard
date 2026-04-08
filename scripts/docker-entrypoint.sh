@@ -52,23 +52,82 @@ fi
 
 chown -R node:node "$INSTANCE_DIR"
 
-# Auto-bootstrap: if there's a user but no instance_admin, promote the first user
+# Auto-bootstrap:
+#   - if an instance_admin already exists, do nothing
+#   - else if any user exists, promote the first user to instance_admin
+#   - else if no pending bootstrap_ceo invite exists, mint one and print the
+#     URL so the operator can click it straight out of the container logs
 if [ -n "$DATABASE_URL" ]; then
     cat > /tmp/_bootstrap.mjs << 'BEOF'
 import postgres from "postgres";
+import crypto from "node:crypto";
+
 const sql = postgres(process.env.DATABASE_URL, { ssl: "prefer", max: 1 });
+
+function hashToken(token) {
+  return crypto.createHash("sha256").update(token).digest("hex");
+}
+
+function createInviteToken() {
+  return `pcp_bootstrap_${crypto.randomBytes(24).toString("hex")}`;
+}
+
+function banner(lines) {
+  const bar = "=".repeat(70);
+  console.log(bar);
+  for (const line of lines) console.log(line);
+  console.log(bar);
+}
+
 try {
   const admins = await sql`SELECT count(*)::int AS c FROM instance_user_roles WHERE role = 'instance_admin'`;
-  if (admins[0].c === 0) {
+  if (admins[0].c > 0) {
+    console.log("Admin already exists, skipping bootstrap");
+  } else {
     const users = await sql`SELECT id, email FROM "user" LIMIT 1`;
     if (users.length > 0) {
       await sql`INSERT INTO instance_user_roles (id, user_id, role, created_at, updated_at) VALUES (gen_random_uuid(), ${users[0].id}, 'instance_admin', NOW(), NOW()) ON CONFLICT DO NOTHING`;
       console.log("Auto-bootstrapped", users[0].email, "as instance_admin");
+    } else {
+      const pending = await sql`
+        SELECT count(*)::int AS c FROM invites
+        WHERE invite_type = 'bootstrap_ceo'
+          AND accepted_at IS NULL
+          AND revoked_at IS NULL
+          AND expires_at > NOW()
+      `;
+      if (pending[0].c > 0) {
+        banner([
+          "Paperclip first-run bootstrap",
+          "A pending bootstrap invite already exists, but its token is not",
+          "recoverable from the database. Check earlier container logs for",
+          "the invite URL, or rotate it by running from a shell with access",
+          "to DATABASE_URL:",
+          "  pnpm paperclipai auth bootstrap-ceo --force",
+        ]);
+      } else {
+        const token = createInviteToken();
+        const tokenHash = hashToken(token);
+        const expiresAt = new Date(Date.now() + 72 * 60 * 60 * 1000);
+        await sql`
+          INSERT INTO invites (invite_type, token_hash, allowed_join_types, expires_at, invited_by_user_id)
+          VALUES ('bootstrap_ceo', ${tokenHash}, 'human', ${expiresAt}, 'system')
+        `;
+        const baseUrl = (process.env.PAPERCLIP_PUBLIC_URL || `http://localhost:${process.env.PORT || 3100}`).replace(/\/+$/, "");
+        banner([
+          "Paperclip first-run bootstrap invite created",
+          "",
+          "Open this URL in your browser to create the first admin user:",
+          `  ${baseUrl}/invite/${token}`,
+          "",
+          `Expires: ${expiresAt.toISOString()}`,
+        ]);
+      }
     }
-  } else {
-    console.log("Admin already exists, skipping bootstrap");
   }
-} catch (e) { console.log("Bootstrap skip:", e.message); }
+} catch (e) {
+  console.log("Bootstrap skip:", e.message);
+}
 await sql.end();
 BEOF
     cd /app && gosu node node /tmp/_bootstrap.mjs 2>&1 || true
