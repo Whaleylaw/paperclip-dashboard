@@ -26,6 +26,14 @@ if [ "$changed" = "1" ]; then
     chown -R node:node /paperclip
 fi
 
+# Render.com: derive PAPERCLIP_PUBLIC_URL from the platform-provided
+# RENDER_EXTERNAL_URL if the operator didn't set one explicitly. This makes
+# the Render blueprint in render.yaml work out of the box on first deploy.
+if [ -z "$PAPERCLIP_PUBLIC_URL" ] && [ -n "$RENDER_EXTERNAL_URL" ]; then
+    echo "Setting PAPERCLIP_PUBLIC_URL=$RENDER_EXTERNAL_URL from RENDER_EXTERNAL_URL"
+    export PAPERCLIP_PUBLIC_URL="$RENDER_EXTERNAL_URL"
+fi
+
 # Ensure the instance config directory exists on the persistent volume
 INSTANCE_DIR="/paperclip/instances/default"
 ENV_FILE="$INSTANCE_DIR/.env"
